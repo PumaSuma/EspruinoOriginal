@@ -1067,6 +1067,8 @@ JsBangleTasks bangleTasks;
 const char *lockReason = 0; ///< If JSBT_LOCK/UNLOCK is set, this is the reason (if known) - should point to a constant string (not on stack!)
 void _jswrap_banglejs_setLocked(bool isLocked, const char *reason);
 void btnHandlerCommon(int button, bool state, IOEventFlags flags);
+bool jswrap_banglejs_setDriverMode(bool isOn);
+void jswrap_banglejs_setDriverMode_internal(bool on);
 
 void jswrap_banglejs_pwrGPS(bool on) {
   if (on) bangleFlags |= JSBF_GPS_ON;
