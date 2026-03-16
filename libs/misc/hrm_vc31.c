@@ -22,8 +22,12 @@
 #include "jswrap_bangle.h" // for jsbangle_push_event
 
 #ifndef EMULATED
-
+//Sexto Edit Puma
 extern JshI2CInfo i2cHRM;
+extern volatile bool driverMode;
+
+#define DRIVER_HRM_POLL_INTERVAL 20 // 50 Hz in driver mode
+
 HrmCallback hrmCallback;
 uint16_t hrmPollInterval = HRM_POLL_INTERVAL_DEFAULT; // in msec, so 20 = 50hz
 
@@ -701,6 +705,8 @@ static void vc31_softreset() {
 
 void hrm_sensor_on(HrmCallback callback) {
   hrmCallback = callback;
+  //Septimo Edit Puma
+  uint16_t effectiveHrmPollInterval = driverMode ? DRIVER_HRM_POLL_INTERVAL : hrmPollInterval;
   jshDelayMicroseconds(1000); // wait for HRM to boot
   unsigned int deviceId = vc31_r(0);
   //jsiConsolePrintf("HRM ID 0x%02x\n",deviceId);
@@ -729,13 +735,14 @@ void hrm_sensor_on(HrmCallback callback) {
     vc31_w(VC31A_AMP_WAIT, 0x14);
 
     // seems to take 2 samples, so to get 50Hz (20ms) we need VC31A_PPG_DIV_100_HZ
+    //Octavo Edit Puma
     uint16_t div;
-    if (hrmPollInterval<2) div = VC31A_PPG_DIV_1000_HZ; // 500Hz
-    else if (hrmPollInterval<=10) div = 160; // 100Hz
-    else if (hrmPollInterval<=20) div = VC31A_PPG_DIV_100_HZ; // 50Hz
-    else if (hrmPollInterval<=40) div = VC31A_PPG_DIV_50_HZ; // 25Hz
-    else if (hrmPollInterval<=80) div = VC31A_PPG_DIV_25_HZ; // 12.5Hz
-    else if (hrmPollInterval<=160) div = VC31A_PPG_DIV_12_5_HZ; // 6.25Hz
+    if (effectiveHrmPollInterval<2) div = VC31A_PPG_DIV_1000_HZ; // 500Hz
+    else if (effectiveHrmPollInterval<=10) div = 160; // 100Hz
+    else if (effectiveHrmPollInterval<=20) div = VC31A_PPG_DIV_100_HZ; // 50Hz
+    else if (effectiveHrmPollInterval<=40) div = VC31A_PPG_DIV_50_HZ; // 25Hz
+    else if (effectiveHrmPollInterval<=80) div = VC31A_PPG_DIV_25_HZ; // 12.5Hz
+    else if (effectiveHrmPollInterval<=160) div = VC31A_PPG_DIV_12_5_HZ; // 6.25Hz
     else div = VC31A_PPG_DIV_10_HZ; // 5Hz
 
     vc31_w16(VC31A_PPG_DIV, div);
@@ -745,7 +752,8 @@ void hrm_sensor_on(HrmCallback callback) {
   //  vc31_w16(VC31A_GREEN_ADJ, 0xe8c3);
   }
   if (vcType == VC31B_DEVICE) {
-    vcbInfo.vcHr02SampleRate = 1000 / hrmPollInterval; // Hz
+    //Noveno Edit Puma
+    vcbInfo.vcHr02SampleRate = 1000 / effectiveHrmPollInterval; // Hz
     // FIXME SAMPLE RATE. Right now this only changes the period for ENV readings
     const uint8_t _regConfig[17] = {
         0x01,      // VC31B_REG11 - just enable SLOT0
@@ -782,7 +790,8 @@ void hrm_sensor_on(HrmCallback callback) {
     vcbInfo.regConfig[12] = 0x67; // VC31B_REG22
     vcbInfo.regConfig[0] = 0x45; // VC31B_REG11 heart rate calculation - SLOT2(env) and SLOT0(hr)
     // Set up HRM speed - from testing, 200=100hz/10ms, 400=50hz/20ms, 800=25hz/40ms
-    uint16_t divisor = 20 * hrmPollInterval;
+    //Decimo Edit Puma
+    uint16_t divisor = 20 * effectiveHrmPollInterval;
     vcbInfo.regConfig[4] = divisor>>8;
     vcbInfo.regConfig[5] = divisor&255;
     // write all registers in one go

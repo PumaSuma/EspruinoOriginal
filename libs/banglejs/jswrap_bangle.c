@@ -683,12 +683,19 @@ JshI2CInfo i2cInternal;
 #define HOME_BTN_PININDEX    BTN5_PININDEX
 #endif
 // =========================================================================
-
+//Primer edit Puma
 #define DEFAULT_ACCEL_POLL_INTERVAL 80 // in msec - 12.5 hz to match accelerometer
 #define POWER_SAVE_ACCEL_POLL_INTERVAL 800 // in msec
 #define POWER_SAVE_MIN_ACCEL 1638 // min acceleration before we exit power save... (8192*0.2)
 #define POWER_SAVE_TIMEOUT 60000 // 60 seconds of inactivity
 #define ACCEL_POLL_INTERVAL_MAX 4000 // in msec - DEFAULT_ACCEL_POLL_INTERVAL_MAX+TIMER_MAX must be <65535
+
+#define DRIVER_ACCEL_POLL_INTERVAL 20   // 50 Hz
+#define DRIVER_HRM_POLL_INTERVAL   20   // 50 Hz
+#define DRIVER_KX023_ODCNTL        0x02 // KX023 ODR = 50 Hz
+
+volatile bool driverMode = false;
+
 #ifndef DEFAULT_BTN_LOAD_TIMEOUT
 #define DEFAULT_BTN_LOAD_TIMEOUT 1500 // in msec - how long does the button have to be pressed for before we restart
 #endif
@@ -1604,8 +1611,8 @@ void peripheralPollHandler() {
       }
     }
 #endif
-    // Power saving
-    if (bangleFlags & JSBF_POWER_SAVE) {
+    // Power saving Tercer Edit Puma
+    if ((bangleFlags & JSBF_POWER_SAVE) && !driverMode) {
       if (accDiff > POWER_SAVE_MIN_ACCEL) {
         powerSaveTimer = 0;
         if (pollInterval == POWER_SAVE_ACCEL_POLL_INTERVAL) {
@@ -3149,6 +3156,61 @@ int jswrap_banglejs_isHRMOn() {
   return (bangleFlags & JSBF_HRM_ON)!=0;
 }
 
+//Doceavo Edit Puma
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "setDriverMode",
+    "generate" : "jswrap_banglejs_setDriverMode",
+    "params" : [
+      ["isOn","bool","True para activar modo conducción, false para desactivarlo"]
+    ],
+    "return" : ["bool","Estado actual de driverMode"],
+    "ifdef" : "BANGLEJS"
+}
+Activa o desactiva el modo conducción del firmware.
+*/
+bool jswrap_banglejs_setDriverMode(bool isOn) {
+  jswrap_banglejs_setDriverMode_internal(isOn);
+  return driverMode;
+}
+
+//Onceavo Edit Puma Funcion Principal
+void jswrap_banglejs_setDriverMode_internal(bool on) {
+  driverMode = on;
+
+  // limpia tareas pendientes que podrían reponer intervalos normales
+  bangleTasks &= ~(JSBT_ACCEL_INTERVAL_DEFAULT | JSBT_ACCEL_INTERVAL_POWERSAVE);
+
+  // reinicia temporizador de ahorro
+  powerSaveTimer = 0;
+
+  // aplica ya el poll interval correcto
+  jswrap_banglejs_setPollInterval_internal(
+    on ? DRIVER_ACCEL_POLL_INTERVAL : DEFAULT_ACCEL_POLL_INTERVAL
+  );
+
+#ifdef ACCEL_DEVICE_KX023
+  // reconfigura el acelerómetro al instante
+  jswrap_banglejs_accelWr(0x18, 0b00101100); // standby
+  if (on) {
+    jswrap_banglejs_accelWr(0x1b, DRIVER_KX023_ODCNTL); // 50 Hz
+  } else {
+    jswrap_banglejs_accelWr(0x1b, 0b00000000); // 12.5 Hz normal
+  }
+  jswrap_banglejs_accelWr(0x18, 0b10101100); // enable
+#endif
+
+#ifdef HEARTRATE
+  // si el HRM ya estaba encendido, lo reiniciamos para que coja la nueva config
+  if (jswrap_banglejs_isHRMOn()) {
+    jswrap_banglejs_setHRMPower(false, SETDEVICEPOWER_FORCE);
+    jswrap_banglejs_setHRMPower(true, SETDEVICEPOWER_FORCE);
+  }
+#endif
+}
+
+
 #ifdef GPS_PIN_RX
 /// Clear all data stored for the GPS input line
 void gpsClearLine() {
@@ -4108,8 +4170,12 @@ NO_INLINE void jswrap_banglejs_init() {
     jsi2cWriteReg(ACCEL_I2C, ACCEL_ADDR-2, 0x19, 0x80); // Second I2C address for software reset (issue #1972)
     jshDelayMicroseconds(2000);
     jswrap_banglejs_accelWr(0x1a,0b10011000); // CNTL3 12.5Hz tilt, 400Hz tap, 0.781Hz motion detection
-    //jswrap_banglejs_accelWr(0x1b,0b00000001); // ODCNTL - 25Hz acceleration output data rate, filtering low-pass ODR/9
-    jswrap_banglejs_accelWr(0x1b,0b00000000); // ODCNTL - 12.5Hz acceleration output data rate, filtering low-pass ODR/9
+    //Segundo Edit Puma
+        if (driverMode) {
+      jswrap_banglejs_accelWr(0x1b, DRIVER_KX023_ODCNTL); // ODCNTL - 50Hz in driver mode
+    } else {
+      jswrap_banglejs_accelWr(0x1b, 0b00000000); // ODCNTL - 12.5Hz in normal mode
+    }
 
     jswrap_banglejs_accelWr(0x1c,0); // INC1 disabled
     jswrap_banglejs_accelWr(0x1d,0); // INC2 disabled
@@ -4230,8 +4296,8 @@ NO_INLINE void jswrap_banglejs_init() {
   //  - the bootloader probably already set this up so the
   //    enable will do nothing - but good to try anyway
   jshEnableWatchDog(5); // 5 second watchdog
-  // This timer kicks the watchdog, and does some other stuff as well
-  pollInterval = DEFAULT_ACCEL_POLL_INTERVAL;
+  // This timer kicks the watchdog, and does some other stuff as well Cuarto Edit Puma
+  pollInterval = driverMode ? DRIVER_ACCEL_POLL_INTERVAL : DEFAULT_ACCEL_POLL_INTERVAL;
   // requires APP_TIMER_OP_QUEUE_SIZE=5 in BOARD.py
   uint32_t err_code = app_timer_create(&m_peripheral_poll_timer_id,
                       APP_TIMER_MODE_REPEATED,
@@ -4404,8 +4470,9 @@ bool jswrap_banglejs_idle() {
       lockReason = 0;
     }
     if (bangleTasks & JSBT_RESET) jsiStatus |= JSIS_TODO_FLASH_LOAD;
-    if (bangleTasks & JSBT_ACCEL_INTERVAL_DEFAULT) jswrap_banglejs_setPollInterval_internal(DEFAULT_ACCEL_POLL_INTERVAL);
-    if (bangleTasks & JSBT_ACCEL_INTERVAL_POWERSAVE) jswrap_banglejs_setPollInterval_internal(POWER_SAVE_ACCEL_POLL_INTERVAL);
+    // Quinto Edit Puma
+    if (bangleTasks & JSBT_ACCEL_INTERVAL_DEFAULT) jswrap_banglejs_setPollInterval_internal(driverMode ? DRIVER_ACCEL_POLL_INTERVAL : DEFAULT_ACCEL_POLL_INTERVAL);
+    if (bangleTasks & JSBT_ACCEL_INTERVAL_POWERSAVE) jswrap_banglejs_setPollInterval_internal(driverMode ? DRIVER_ACCEL_POLL_INTERVAL : POWER_SAVE_ACCEL_POLL_INTERVAL);
     if (bangleTasks & JSBT_ACCEL_DATA) {
       JsVar *o = jswrap_banglejs_getAccel();
       if (o) {
