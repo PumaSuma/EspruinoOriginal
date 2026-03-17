@@ -43,10 +43,10 @@
 #include "nrf_soc.h"
 #include "nrf_saadc.h"
 #include "nrf5x_utils.h"
-
-#include "bluetooth.h" // for self-test
 #include "jsi2c.h" // accelerometer/etc
 #endif
+
+#include "bluetooth.h" // BLE helpers also needed in emulator builds
 
 #include "jswrap_graphics.h"
 #ifdef LCD_CONTROLLER_LPM013M126
@@ -3280,6 +3280,7 @@ void driverBleResetBatch(void) {
 
 //Vigesimonoveno Edit Puma
 void driverBleTrySendBatch(void) {
+#if defined(NRF5X) && !defined(EMULATED)
   if (!driverBleStreamEnabled) return;
   if (!driverBleBatchReady) return;
 
@@ -3301,6 +3302,9 @@ void driverBleTrySendBatch(void) {
   driverBleDroppedPackets++;
   driverBlePacketSeq++;
   driverBleResetBatch();
+#else
+  return;
+#endif
 }
 
 //Trigesimo Edit Puma
@@ -3380,7 +3384,11 @@ int jswrap_banglejs_isDriverBLEStreamOn() {
 Devuelve si hay una conexión BLE activa para el stream del modo conducción.
 */
 int jswrap_banglejs_isDriverBLEConnected() {
+#if defined(NRF5X) && !defined(EMULATED)
   return jsble_has_peripheral_connection();
+#else
+  return 0;
+#endif
 }
 
 //Onceavo Edit Puma Funcion Principal
