@@ -38,6 +38,9 @@ int jswrap_banglejs_isHRMOn();
 //Treceavo Edit Puma
 bool jswrap_banglejs_setDriverMode(bool isOn);
 int jswrap_banglejs_isDriverMode();
+//Vigesimooctavo Edit Puma
+int jswrap_banglejs_isDriverBLEConnected();
+
 //Decimosexto Edit Puma
 bool jswrap_banglejs_setDriverBLEStream(bool isOn);
 int jswrap_banglejs_isDriverBLEStreamOn();

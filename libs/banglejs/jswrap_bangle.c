@@ -696,29 +696,44 @@ JshI2CInfo i2cInternal;
 
 volatile bool driverMode = false;
 
-//Decimoquinto Edit Puma
-#define DRIVER_BLE_SERVICE_UUID    0xA0A0
-#define DRIVER_BLE_DATA_CHAR_UUID  0xA0A1
-#define DRIVER_BLE_CTRL_CHAR_UUID  0xA0A2
-#define DRIVER_PACKET_MAGIC        0xA5
-#define DRIVER_PACKET_VERSION      0x01
+//Decimoseptimo Edit Puma
+#define DRIVER_BLE_SAMPLES_PER_PACKET 5
+#define DRIVER_BLE_PACKET_MAGIC       0xA5
+#define DRIVER_BLE_PACKET_VERSION     0x01
 
 volatile bool driverBleStreamEnabled = false;
-volatile uint16_t driverBleSeq = 0;
+volatile uint16_t driverBlePacketSeq = 0;
+volatile uint8_t driverBleSampleCount = 0;
 
-typedef struct {
-  uint8_t magic;
-  uint8_t version;
-  uint16_t seq;
+volatile bool driverBleBatchReady = false;
+volatile uint32_t driverBleDroppedPackets = 0;
+
+//Vigesimo Edit Puma
+#define DRIVER_FLAG_WORN           0x01
+#define DRIVER_FLAG_HRM_CONFIDENT  0x02
+
+volatile uint16_t driverLatestPpg = 0;
+volatile uint16_t driverLatestEnv = 0;
+volatile uint8_t driverLatestFlags = 0;
+
+typedef struct PACKED_FLAGS {
   int16_t ax;
   int16_t ay;
   int16_t az;
   uint16_t ppg;
   uint16_t env;
-  uint8_t flags;
-} DriverBlePacket;
+} DriverBleSample;
 
-DriverBlePacket driverBlePacket;
+typedef struct PACKED_FLAGS {
+  uint8_t magic;
+  uint8_t version;
+  uint16_t seq;
+  uint8_t count;
+  uint8_t flags;
+  DriverBleSample samples[DRIVER_BLE_SAMPLES_PER_PACKET];
+} DriverBleBatchPacket;
+
+DriverBleBatchPacket driverBleBatchPacket;
 
 #ifndef DEFAULT_BTN_LOAD_TIMEOUT
 #define DEFAULT_BTN_LOAD_TIMEOUT 1500 // in msec - how long does the button have to be pressed for before we restart
@@ -1091,6 +1106,11 @@ JsBangleTasks bangleTasks;
 const char *lockReason = 0; ///< If JSBT_LOCK/UNLOCK is set, this is the reason (if known) - should point to a constant string (not on stack!)
 void _jswrap_banglejs_setLocked(bool isLocked, const char *reason);
 void btnHandlerCommon(int button, bool state, IOEventFlags flags);
+//Decimooctavo Edit Puma
+void driverBleResetBatch(void);
+void driverBleTrySendBatch(void);
+void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t env, uint8_t flags);
+
 bool jswrap_banglejs_setDriverMode(bool isOn);
 int jswrap_banglejs_isDriverMode();
 void jswrap_banglejs_setDriverMode_internal(bool on);
@@ -1613,6 +1633,18 @@ void peripheralPollHandler() {
     accHistory[accHistoryIdx  ] = clipi8(newx>>7);
     accHistory[accHistoryIdx+1] = clipi8(newy>>7);
     accHistory[accHistoryIdx+2] = clipi8(newz>>7);
+    //Vigesimosegundo Edit Puma
+        if (driverMode && driverBleStreamEnabled) {
+      driverBleQueueSample(
+        acc.x,
+        acc.y,
+        acc.z,
+        driverLatestPpg,
+        driverLatestEnv,
+        driverLatestFlags
+      );
+    }
+
 #ifdef HEARTRATE_VC31_BINARY
     // Activity detection
     hrmSportActivity = ((hrmSportActivity*63)+MIN(accDiff,4096))>>6; // running average
@@ -1812,6 +1844,17 @@ void peripheralPollHandler() {
 
 #ifdef HEARTRATE
 static void hrmHandler(int ppgValue) {
+  //Vigesimoprimer Edit Puma
+    if (driverMode) {
+    driverLatestPpg = vcInfo.ppgValue;
+    driverLatestEnv = vcInfo.envValue;
+    driverLatestFlags = 0;
+#ifdef HEARTRATE_VC31_BINARY
+    if (hrmInfo.isWorn) driverLatestFlags |= DRIVER_FLAG_WORN;
+#endif
+    if (hrmInfo.confidence >= 90) driverLatestFlags |= DRIVER_FLAG_HRM_CONFIDENT;
+  }
+
   if (hrm_new(ppgValue, &acc)) {
     bangleTasks |= JSBT_HRM_DATA;
     // keep track of best HRM sample during this period
@@ -3216,6 +3259,72 @@ Devuelve si el modo conducción del firmware está activado.
 int jswrap_banglejs_isDriverMode() {
   return driverMode;
 }
+//Decimonoveno Edit Puma
+void driverBleResetBatch(void) {
+  memset(&driverBleBatchPacket, 0, sizeof(driverBleBatchPacket));
+  driverBleBatchPacket.magic = DRIVER_BLE_PACKET_MAGIC;
+  driverBleBatchPacket.version = DRIVER_BLE_PACKET_VERSION;
+  driverBleBatchPacket.seq = driverBlePacketSeq;
+  driverBleBatchPacket.count = 0;
+  driverBleBatchPacket.flags = 0;
+  driverBleSampleCount = 0;
+  driverBleBatchReady = false;
+}
+
+//Vigesimonoveno Edit Puma
+void driverBleTrySendBatch(void) {
+  if (!driverBleStreamEnabled) return;
+  if (!driverBleBatchReady) return;
+
+  uint32_t err = jsble_driver_nus_send(
+    (const uint8_t*)&driverBleBatchPacket,
+    sizeof(DriverBleBatchPacket)
+  );
+
+  if (err == NRF_SUCCESS) {
+    driverBlePacketSeq++;
+    driverBleResetBatch();
+    return;
+  }
+
+  if (err == NRF_ERROR_RESOURCES || err == NRF_ERROR_BUSY) {
+    return;
+  }
+
+  driverBleDroppedPackets++;
+  driverBlePacketSeq++;
+  driverBleResetBatch();
+}
+
+//Trigesimo Edit Puma
+void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t env, uint8_t flags) {
+  if (!driverBleStreamEnabled) return;
+  if (driverBleBatchReady) return;
+
+  if (driverBleSampleCount == 0) {
+    driverBleResetBatch();
+  }
+
+  if (driverBleSampleCount >= DRIVER_BLE_SAMPLES_PER_PACKET) {
+    return;
+  }
+
+  driverBleBatchPacket.samples[driverBleSampleCount].ax = ax;
+  driverBleBatchPacket.samples[driverBleSampleCount].ay = ay;
+  driverBleBatchPacket.samples[driverBleSampleCount].az = az;
+  driverBleBatchPacket.samples[driverBleSampleCount].ppg = ppg;
+  driverBleBatchPacket.samples[driverBleSampleCount].env = env;
+  driverBleBatchPacket.flags |= flags;
+
+  driverBleSampleCount++;
+  driverBleBatchPacket.count = driverBleSampleCount;
+
+  if (driverBleSampleCount >= DRIVER_BLE_SAMPLES_PER_PACKET) {
+    driverBleBatchReady = true;
+    driverBleTrySendBatch();
+  }
+}
+
 //Decimoseptimo Edit Puma
 /*JSON{
     "type" : "staticmethod",
@@ -3230,8 +3339,12 @@ int jswrap_banglejs_isDriverMode() {
 }
 Activa o desactiva el stream BLE del modo conducción.
 */
+//Trigesimoprimer Edit Puma
 bool jswrap_banglejs_setDriverBLEStream(bool isOn) {
   driverBleStreamEnabled = isOn;
+  driverBlePacketSeq = 0;
+  driverBleDroppedPackets = 0;
+  driverBleResetBatch();
   return driverBleStreamEnabled;
 }
 
@@ -3248,10 +3361,31 @@ Devuelve si el stream BLE del modo conducción está activado.
 int jswrap_banglejs_isDriverBLEStreamOn() {
   return driverBleStreamEnabled;
 }
+//Trigesimosegun Edit Puma
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "isDriverBLEConnected",
+    "generate" : "jswrap_banglejs_isDriverBLEConnected",
+    "return" : ["bool","True si hay una conexión BLE activa"],
+    "ifdef" : "BANGLEJS"
+}
+Devuelve si hay una conexión BLE activa para el stream del modo conducción.
+*/
+int jswrap_banglejs_isDriverBLEConnected() {
+  return jsble_has_peripheral_connection();
+}
 
 //Onceavo Edit Puma Funcion Principal
 void jswrap_banglejs_setDriverMode_internal(bool on) {
   driverMode = on;
+
+  //Vigesimocuarto Edit Puma
+    if (!on) {
+    driverBleStreamEnabled = false;
+  }
+  driverBlePacketSeq = 0;
+  driverBleResetBatch();
 
   // limpia tareas pendientes que podrían reponer intervalos normales
   bangleTasks &= ~(JSBT_ACCEL_INTERVAL_DEFAULT | JSBT_ACCEL_INTERVAL_POWERSAVE);
@@ -4525,6 +4659,9 @@ bool jswrap_banglejs_idle() {
     bangleFlags |= JSBF_HRM_INSTANT_LISTENER;
   else
     bangleFlags &= ~JSBF_HRM_INSTANT_LISTENER;
+  if (driverMode && driverBleStreamEnabled && driverBleBatchReady) {
+  driverBleTrySendBatch();
+}
 #endif
 
   if (!bangle) {

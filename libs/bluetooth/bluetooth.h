@@ -282,6 +282,9 @@ int jsble_get_central_connection_idx(uint16_t handle);
 /** Is BLE connected to a server device at all (eg, the simple, 'slave' mode)? */
 bool jsble_has_peripheral_connection();
 
+//Vigesimosexto Edit Puma
+uint32_t jsble_driver_nus_send(const uint8_t *data, uint16_t len);
+
 /** Call this when something happens on BLE with this as
  * a peripheral - used with Dynamic Interval Adjustment  */
 void jsble_peripheral_activity();

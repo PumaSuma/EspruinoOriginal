@@ -974,6 +974,28 @@ static void nus_data_handler(ble_nus_evt_t * p_evt) {
 }
 #endif
 
+
+
+uint32_t jsble_driver_nus_send(const uint8_t *data, uint16_t len) {
+  if (!jsble_has_peripheral_connection() ||
+      !(bleStatus & BLE_NUS_INITED) ||
+      (bleStatus & BLE_IS_SLEEPING)) {
+    return NRF_ERROR_INVALID_STATE;
+  }
+
+  uint16_t max_data_len = MIN((m_peripheral_effective_mtu - 3), BLE_NUS_MAX_DATA_LEN);
+  if (len > max_data_len) {
+    return NRF_ERROR_DATA_SIZE;
+  }
+
+#if NRF_SD_BLE_API_VERSION > 5
+  uint16_t txLen = len;
+  return ble_nus_data_send(&m_nus, (uint8_t*)data, &txLen, m_peripheral_conn_handle);
+#else
+  return ble_nus_string_send(&m_nus, (uint8_t*)data, len);
+#endif
+}
+
 void nus_transmit_string() {
   if (!jsble_has_peripheral_connection() ||
       !(bleStatus & BLE_NUS_INITED) ||
@@ -983,42 +1005,41 @@ void nus_transmit_string() {
     jshTransmitClearDevice(EV_BLUETOOTH);
     return;
   }
+
   /* 6 is the max number of packets we can send
    * in one connection interval on nRF52. We could
    * do 5, but it seems some things have issues with
    * this (eg nRF cloud gateways) so only send 1 packet
    * for now. */
-  int max_data_len = MIN((m_peripheral_effective_mtu-3),BLE_NUS_MAX_DATA_LEN);
-  for (int packet=0;packet<1;packet++) {
-    // No data? try and get some from our queue
+  int max_data_len = MIN((m_peripheral_effective_mtu - 3), BLE_NUS_MAX_DATA_LEN);
+  for (int packet = 0; packet < 1; packet++) {
     if (!nuxTxBufLength) {
       nuxTxBufLength = 0;
       int ch = jshGetCharToTransmit(EV_BLUETOOTH);
-      while (ch>=0) {
+      while (ch >= 0) {
         nusTxBuf[nuxTxBufLength++] = ch;
-        if (nuxTxBufLength>=max_data_len) break;
+        if (nuxTxBufLength >= max_data_len) break;
         ch = jshGetCharToTransmit(EV_BLUETOOTH);
       }
     }
+
     // If there's no data in the queue, nothing to do - leave
     if (!nuxTxBufLength) return;
     jsble_peripheral_activity(); // flag that we've been busy
-    // We have data - try and send it
 
-#if NRF_SD_BLE_API_VERSION>5
+#if NRF_SD_BLE_API_VERSION > 5
     uint32_t err_code = ble_nus_data_send(&m_nus, nusTxBuf, &nuxTxBufLength, m_peripheral_conn_handle);
-#elif NRF_SD_BLE_API_VERSION<5
+#elif NRF_SD_BLE_API_VERSION < 5
     uint32_t err_code = ble_nus_string_send(&m_nus, nusTxBuf, nuxTxBufLength);
-#else // NRF_SD_BLE_API_VERSION==5
+#else
     uint32_t err_code = ble_nus_string_send(&m_nus, nusTxBuf, &nuxTxBufLength);
 #endif
+
     if (err_code == NRF_SUCCESS) {
-      nuxTxBufLength=0; // everything sent Ok
+      nuxTxBufLength = 0; // everything sent Ok
       bleStatus |= BLE_IS_SENDING;
-    } else if (err_code==NRF_ERROR_INVALID_STATE) {
+    } else if (err_code == NRF_ERROR_INVALID_STATE) {
       // If no notifications we are connected but the central isn't reading, so sends will fail.
-      // Ideally we check m_nus.is_notification_enabled but SDK15 changed this, so lets just see if
-      // the send creates a NRF_ERROR_INVALID_STATE error
       nuxTxBufLength = 0; // clear tx buffer
       jshTransmitClearDevice(EV_BLUETOOTH); // clear all tx data in queue
     }
