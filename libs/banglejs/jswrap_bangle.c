@@ -1068,6 +1068,7 @@ const char *lockReason = 0; ///< If JSBT_LOCK/UNLOCK is set, this is the reason 
 void _jswrap_banglejs_setLocked(bool isLocked, const char *reason);
 void btnHandlerCommon(int button, bool state, IOEventFlags flags);
 bool jswrap_banglejs_setDriverMode(bool isOn);
+int jswrap_banglejs_isDriverMode();
 void jswrap_banglejs_setDriverMode_internal(bool on);
 
 void jswrap_banglejs_pwrGPS(bool on) {
@@ -3173,6 +3174,22 @@ int jswrap_banglejs_isHRMOn() {
 Activa o desactiva el modo conducción del firmware.
 */
 bool jswrap_banglejs_setDriverMode(bool isOn) {
+  //Decimocuarto Edit Puma
+  /*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "isDriverMode",
+    "generate" : "jswrap_banglejs_isDriverMode",
+    "return" : ["bool","True si el modo conducción está activo"],
+    "ifdef" : "BANGLEJS"
+  }
+  Devuelve si el modo conducción del firmware está activado.
+  */
+  // usamos int igual que en isHRMOn para evitar líos de wrapper
+  int jswrap_banglejs_isDriverMode() {
+    return driverMode;
+  }
+
   jswrap_banglejs_setDriverMode_internal(isOn);
   return driverMode;
 }

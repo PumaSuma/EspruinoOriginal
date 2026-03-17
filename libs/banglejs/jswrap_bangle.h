@@ -37,6 +37,7 @@ bool jswrap_banglejs_setHRMPower(bool isOn, JsVar *appId);
 int jswrap_banglejs_isHRMOn();
 //Treceavo Edit Puma
 bool jswrap_banglejs_setDriverMode(bool isOn);
+int jswrap_banglejs_isDriverMode();
 void jswrap_banglejs_setDriverMode_internal(bool on);
 
 bool jswrap_banglejs_setGPSPower(bool isOn, JsVar *appId);
