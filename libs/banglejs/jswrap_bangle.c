@@ -43,6 +43,8 @@
 #include "nrf_soc.h"
 #include "nrf_saadc.h"
 #include "nrf5x_utils.h"
+
+#include "bluetooth.h" // for self-test
 #include "jsi2c.h" // accelerometer/etc
 #endif
 
