@@ -3174,23 +3174,22 @@ int jswrap_banglejs_isHRMOn() {
 Activa o desactiva el modo conducción del firmware.
 */
 bool jswrap_banglejs_setDriverMode(bool isOn) {
-  //Decimocuarto Edit Puma
-  /*JSON{
+  jswrap_banglejs_setDriverMode_internal(isOn);
+  return driverMode;
+}
+
+/*JSON{
     "type" : "staticmethod",
     "class" : "Bangle",
     "name" : "isDriverMode",
     "generate" : "jswrap_banglejs_isDriverMode",
     "return" : ["bool","True si el modo conducción está activo"],
     "ifdef" : "BANGLEJS"
-  }
-  Devuelve si el modo conducción del firmware está activado.
-  */
-  // usamos int igual que en isHRMOn para evitar líos de wrapper
-  int jswrap_banglejs_isDriverMode() {
-    return driverMode;
-  }
-
-  jswrap_banglejs_setDriverMode_internal(isOn);
+}
+Devuelve si el modo conducción del firmware está activado.
+*/
+// usamos int igual que en isHRMOn para evitar líos de wrapper
+int jswrap_banglejs_isDriverMode() {
   return driverMode;
 }
 
