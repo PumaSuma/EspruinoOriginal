@@ -48,7 +48,6 @@
 #include "jsi2c.h" // accelerometer/etc
 #endif
 
-#include "bluetooth.h" // BLE helpers also needed in emulator builds
 
 #include "jswrap_graphics.h"
 #ifdef LCD_CONTROLLER_LPM013M126
