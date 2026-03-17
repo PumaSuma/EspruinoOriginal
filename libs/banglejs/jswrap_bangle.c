@@ -1845,15 +1845,22 @@ void peripheralPollHandler() {
 #ifdef HEARTRATE
 static void hrmHandler(int ppgValue) {
   //Vigesimoprimer Edit Puma
-    if (driverMode) {
+    #ifdef HEARTRATE_VC31_BINARY
+  if (driverMode) {
     driverLatestPpg = vcInfo.ppgValue;
     driverLatestEnv = vcInfo.envValue;
     driverLatestFlags = 0;
-#ifdef HEARTRATE_VC31_BINARY
     if (hrmInfo.isWorn) driverLatestFlags |= DRIVER_FLAG_WORN;
-#endif
     if (hrmInfo.confidence >= 90) driverLatestFlags |= DRIVER_FLAG_HRM_CONFIDENT;
   }
+#else
+  if (driverMode) {
+    driverLatestPpg = ppgValue;
+    driverLatestEnv = 0;
+    driverLatestFlags = 0;
+    if (hrmInfo.confidence >= 90) driverLatestFlags |= DRIVER_FLAG_HRM_CONFIDENT;
+  }
+#endif
 
   if (hrm_new(ppgValue, &acc)) {
     bangleTasks |= JSBT_HRM_DATA;
