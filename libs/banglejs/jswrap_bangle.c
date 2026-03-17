@@ -696,6 +696,30 @@ JshI2CInfo i2cInternal;
 
 volatile bool driverMode = false;
 
+//Decimoquinto Edit Puma
+#define DRIVER_BLE_SERVICE_UUID    0xA0A0
+#define DRIVER_BLE_DATA_CHAR_UUID  0xA0A1
+#define DRIVER_BLE_CTRL_CHAR_UUID  0xA0A2
+#define DRIVER_PACKET_MAGIC        0xA5
+#define DRIVER_PACKET_VERSION      0x01
+
+volatile bool driverBleStreamEnabled = false;
+volatile uint16_t driverBleSeq = 0;
+
+typedef struct {
+  uint8_t magic;
+  uint8_t version;
+  uint16_t seq;
+  int16_t ax;
+  int16_t ay;
+  int16_t az;
+  uint16_t ppg;
+  uint16_t env;
+  uint8_t flags;
+} DriverBlePacket;
+
+DriverBlePacket driverBlePacket;
+
 #ifndef DEFAULT_BTN_LOAD_TIMEOUT
 #define DEFAULT_BTN_LOAD_TIMEOUT 1500 // in msec - how long does the button have to be pressed for before we restart
 #endif
@@ -3191,6 +3215,38 @@ Devuelve si el modo conducción del firmware está activado.
 // usamos int igual que en isHRMOn para evitar líos de wrapper
 int jswrap_banglejs_isDriverMode() {
   return driverMode;
+}
+//Decimoseptimo Edit Puma
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "setDriverBLEStream",
+    "generate" : "jswrap_banglejs_setDriverBLEStream",
+    "params" : [
+      ["isOn","bool","True para activar el stream BLE, false para desactivarlo"]
+    ],
+    "return" : ["bool","Estado actual del stream BLE"],
+    "ifdef" : "BANGLEJS"
+}
+Activa o desactiva el stream BLE del modo conducción.
+*/
+bool jswrap_banglejs_setDriverBLEStream(bool isOn) {
+  driverBleStreamEnabled = isOn;
+  return driverBleStreamEnabled;
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "isDriverBLEStreamOn",
+    "generate" : "jswrap_banglejs_isDriverBLEStreamOn",
+    "return" : ["bool","True si el stream BLE está activo"],
+    "ifdef" : "BANGLEJS"
+}
+Devuelve si el stream BLE del modo conducción está activado.
+*/
+int jswrap_banglejs_isDriverBLEStreamOn() {
+  return driverBleStreamEnabled;
 }
 
 //Onceavo Edit Puma Funcion Principal

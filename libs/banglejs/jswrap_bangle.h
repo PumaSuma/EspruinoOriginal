@@ -38,6 +38,10 @@ int jswrap_banglejs_isHRMOn();
 //Treceavo Edit Puma
 bool jswrap_banglejs_setDriverMode(bool isOn);
 int jswrap_banglejs_isDriverMode();
+//Decimosexto Edit Puma
+bool jswrap_banglejs_setDriverBLEStream(bool isOn);
+int jswrap_banglejs_isDriverBLEStreamOn();
+
 void jswrap_banglejs_setDriverMode_internal(bool on);
 
 bool jswrap_banglejs_setGPSPower(bool isOn, JsVar *appId);
