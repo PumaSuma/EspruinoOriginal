@@ -3418,6 +3418,12 @@ Activa o desactiva el stream BLE del modo conducción.
 */
 //Trigesimoprimer Edit Puma
 bool jswrap_banglejs_setDriverBLEStream(bool isOn) {
+  if (isOn && !driverMode) {
+    driverBleStreamEnabled = false;
+    driverBleResetBatch();
+    return false;
+  }
+
   driverBleStreamEnabled = isOn;
   driverBlePacketSeq = 0;
   driverBleDroppedPackets = 0;

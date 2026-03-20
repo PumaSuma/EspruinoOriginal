@@ -988,12 +988,20 @@ uint32_t jsble_driver_nus_send(const uint8_t *data, uint16_t len) {
     return NRF_ERROR_DATA_SIZE;
   }
 
+  jsble_peripheral_activity(); // mantenemos el enlace en modo activo mientras streameamos
+
 #if NRF_SD_BLE_API_VERSION > 5
   uint16_t txLen = len;
-  return ble_nus_data_send(&m_nus, (uint8_t*)data, &txLen, m_peripheral_conn_handle);
+  uint32_t err = ble_nus_data_send(&m_nus, (uint8_t*)data, &txLen, m_peripheral_conn_handle);
 #else
-  return ble_nus_string_send(&m_nus, (uint8_t*)data, len);
+  uint32_t err = ble_nus_string_send(&m_nus, (uint8_t*)data, len);
 #endif
+
+  if (err == NRF_SUCCESS) {
+    bleStatus |= BLE_IS_SENDING;
+  }
+
+  return err;
 }
 
 void nus_transmit_string() {
