@@ -182,6 +182,16 @@ typedef struct {
   VC31AdjustInfo_t adjustInfo;
 } PACKED_FLAGS VC31AInfo;
 
+// ESTA STRUCT NO PUEDE FALTAR
+typedef struct {
+  uint8_t maxLedCur;
+  uint8_t pdResValue[3];
+  uint8_t currentValue[3];
+  uint8_t psValue;      // PS Sample value
+  uint8_t preValue[2];  // PRE / environment-related sample value
+  uint8_t envValue[3];  // ENV sample value
+} PACKED_FLAGS VC31BSample;
+
 typedef struct {
   uint8_t vcHr02SampleRate; // Heart rate sample frequency
   uint8_t status; // REG2
@@ -191,10 +201,10 @@ typedef struct {
 
   uint8_t ledCurrent[3];
   uint8_t ledMaxCurrent[3];
-  uint8_t pdRes[3],pdResMax[3];
-  uint8_t pdResSet[3],ppgGain[3];
+  uint8_t pdRes[3], pdResMax[3];
+  uint8_t pdResSet[3], ppgGain[3];
   uint16_t divisor;
-  bool slot0EnvIsExceedFlag,slot1EnvIsExceedFlag;
+  bool slot0EnvIsExceedFlag, slot1EnvIsExceedFlag;
 
   uint8_t regConfig[17]; // all config registers (written to VC31B_REG11)
   bool psBiasReadInPdFlag;
