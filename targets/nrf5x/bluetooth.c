@@ -212,6 +212,10 @@ ble_uuid_t bleUUIDFilter;
 /// When doing service discovery, this is the last handle we'll need to discover with
 uint16_t bleFinalHandle;
 
+// Stream driver: límite propio, separado del NUS general
+#define DRIVER_NUS_MAX_DATA_LEN 50
+#define DRIVER_ATT_OVERHEAD 3
+
 /// Array of data waiting to be sent over Bluetooth NUS
 uint8_t nusTxBuf[BLE_NUS_MAX_DATA_LEN];
 /// Number of bytes ready to send inside nusTxBuf
@@ -983,12 +987,21 @@ uint32_t jsble_driver_nus_send(const uint8_t *data, uint16_t len) {
     return NRF_ERROR_INVALID_STATE;
   }
 
-  uint16_t max_data_len = MIN((m_peripheral_effective_mtu - 3), BLE_NUS_MAX_DATA_LEN);
+  if (m_peripheral_effective_mtu <= DRIVER_ATT_OVERHEAD) {
+    return NRF_ERROR_INVALID_STATE;
+  }
+
+  uint16_t driver_max = DRIVER_NUS_MAX_DATA_LEN;
+  if (driver_max > BLE_NUS_MAX_DATA_LEN) {
+    driver_max = BLE_NUS_MAX_DATA_LEN;
+  }
+
+  uint16_t max_data_len = MIN((m_peripheral_effective_mtu - DRIVER_ATT_OVERHEAD), driver_max);
   if (len > max_data_len) {
     return NRF_ERROR_DATA_SIZE;
   }
 
-  jsble_peripheral_activity(); // mantenemos el enlace en modo activo mientras streameamos
+  jsble_peripheral_activity();
 
 #if NRF_SD_BLE_API_VERSION > 5
   uint16_t txLen = len;
