@@ -699,7 +699,7 @@ volatile bool driverMode = false;
 
 //Decimoseptimo Edit Puma
 #define DRIVER_BLE_SAMPLES_PER_PACKET 5
-#define DRIVER_BLE_PACKET_VERSION     0x01
+#define DRIVER_BLE_PACKET_VERSION     0x02
 
 #define DRIVER_BLE_SEQ_BITS           18
 #define DRIVER_BLE_SEQ_MASK           ((1UL << DRIVER_BLE_SEQ_BITS) - 1UL)
@@ -721,11 +721,11 @@ volatile bool driverBleBatchReady = false;
 volatile uint32_t driverBleDroppedPackets = 0;
 
 //Vigesimo Edit Puma
-#define DRIVER_FLAG_WORN           0x01
-#define DRIVER_FLAG_HRM_CONFIDENT  0x02
+#define DRIVER_FLAG_WORN       0x01
+#define DRIVER_FLAG_PPG_VALID  0x02
 
 volatile uint16_t driverLatestPpg = 0;
-volatile uint16_t driverLatestEnv = 0;
+volatile uint16_t driverLatestPs = 0;
 volatile uint8_t driverLatestFlags = 0;
 
 typedef struct PACKED_FLAGS {
@@ -733,7 +733,7 @@ typedef struct PACKED_FLAGS {
   int16_t ay;
   int16_t az;
   uint16_t ppg;
-  uint16_t env;
+  uint16_t ps;
 } DriverBleSample;
 
 DriverBleSample driverBleSamples[DRIVER_BLE_SAMPLES_PER_PACKET];
@@ -1113,7 +1113,7 @@ void btnHandlerCommon(int button, bool state, IOEventFlags flags);
 //Decimooctavo Edit Puma
 void driverBleResetBatch(void);
 void driverBleTrySendBatch(void);
-void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t env, uint8_t flags);
+void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t ps, uint8_t flags);
 
 bool jswrap_banglejs_setDriverMode(bool isOn);
 int jswrap_banglejs_isDriverMode();
@@ -1644,7 +1644,7 @@ void peripheralPollHandler() {
         acc.y,
         acc.z,
         driverLatestPpg,
-        driverLatestEnv,
+        driverLatestPs,
         driverLatestFlags
       );
     }
@@ -1848,21 +1848,23 @@ void peripheralPollHandler() {
 
 #ifdef HEARTRATE
 static void hrmHandler(int ppgValue) {
-  //Vigesimoprimer Edit Puma
-    #ifdef HEARTRATE_VC31_BINARY
+  // Driver-mode BLE stream should expose raw HRM state, not BPM confidence.
+#ifdef HEARTRATE_VC31_BINARY
   if (driverMode) {
-    driverLatestPpg = vcInfo.ppgValue;
-    driverLatestEnv = vcInfo.envValue;
-    driverLatestFlags = 0;
-    if (hrmInfo.isWorn) driverLatestFlags |= DRIVER_FLAG_WORN;
-    if (hrmInfo.confidence >= 90) driverLatestFlags |= DRIVER_FLAG_HRM_CONFIDENT;
+    DriverHrmRawStatus raw;
+    if (hrmGetDriverRawStatus(&raw)) {
+      driverLatestPpg = raw.ppg_raw;
+      driverLatestPs = raw.ps_raw;
+      driverLatestFlags = 0;
+      if (raw.worn_stable) driverLatestFlags |= DRIVER_FLAG_WORN;
+      if (raw.ppg_valid) driverLatestFlags |= DRIVER_FLAG_PPG_VALID;
+    }
   }
 #else
   if (driverMode) {
     driverLatestPpg = ppgValue;
-    driverLatestEnv = 0;
+    driverLatestPs = 0;
     driverLatestFlags = 0;
-    if (hrmInfo.confidence >= 90) driverLatestFlags |= DRIVER_FLAG_HRM_CONFIDENT;
   }
 #endif
 
@@ -3289,8 +3291,8 @@ static uint16_t driverBlePackPpg(uint16_t ppg) {
   return (ppg > DRIVER_PPG_PACK_MAX) ? DRIVER_PPG_PACK_MAX : ppg;
 }
 
-static uint8_t driverBlePackEnv(uint16_t env) {
-  return (env > DRIVER_ENV_PACK_MAX) ? DRIVER_ENV_PACK_MAX : (uint8_t)env;
+static uint8_t driverBlePackPs(uint16_t ps) {
+  return (ps > DRIVER_ENV_PACK_MAX) ? DRIVER_ENV_PACK_MAX : (uint8_t)ps;
 }
 
 static void driverBleWriteBits(uint8_t *dst, uint16_t *bitPos, uint32_t value, uint8_t bitCount) {
@@ -3316,13 +3318,13 @@ static uint16_t driverBleBuildPackedBatch(uint8_t *out) {
   driverBleWriteBits(out, &bitPos, (uint32_t)(driverBleBatchFlags & 0x03), 2);
   driverBleWriteBits(out, &bitPos, (uint32_t)(DRIVER_BLE_PACKET_VERSION & 0x03), 2);
 
-  // 5 muestras, 64 bits cada una
+  // 5 muestras, 64 bits cada una (last 4 bits now carry PS raw, not ENV)
   for (i = 0; i < DRIVER_BLE_SAMPLES_PER_PACKET; i++) {
     driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackAccel(driverBleSamples[i].ax), 16);
     driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackAccel(driverBleSamples[i].ay), 16);
     driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackAccel(driverBleSamples[i].az), 16);
     driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackPpg(driverBleSamples[i].ppg), 12);
-    driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackEnv(driverBleSamples[i].env), 4);
+    driverBleWriteBits(out, &bitPos, (uint32_t)driverBlePackPs(driverBleSamples[i].ps), 4);
   }
 
   return DRIVER_BLE_PACKET_BYTES;
@@ -3367,7 +3369,7 @@ void driverBleTrySendBatch(void) {
 }
 
 //Trigesimo Edit Puma
-void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t env, uint8_t flags) {
+void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint16_t ps, uint8_t flags) {
   if (!driverBleStreamEnabled) return;
   if (driverBleBatchReady) return;
 
@@ -3390,7 +3392,7 @@ void driverBleQueueSample(int16_t ax, int16_t ay, int16_t az, uint16_t ppg, uint
   driverBleSamples[driverBleSampleCount].ay = ay;
   driverBleSamples[driverBleSampleCount].az = az;
   driverBleSamples[driverBleSampleCount].ppg = ppg;
-  driverBleSamples[driverBleSampleCount].env = env;
+  driverBleSamples[driverBleSampleCount].ps = ps;
 
   driverBleBatchFlags |= (flags & 0x03);
 

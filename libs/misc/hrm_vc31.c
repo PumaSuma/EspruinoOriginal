@@ -93,8 +93,14 @@ uint16_t hrmPollInterval = HRM_POLL_INTERVAL_DEFAULT; // in msec, so 20 = 50hz
 #define VC31B_INT_ENV                         0x02 // EnvAdjust
 #define VC31B_INT_PPG                         0x01 // PpgAdjust
 
-#define VC31B_PS_TH                     6 // threshold for wearing/not
+#define VC31B_PS_TH                     6 // legacy threshold for wearing/not
 #define VC31B_PPG_TH                    10 // Causes of PPG interruption PPG_TH = 300
+#define VC31B_PS_WEAR_ON_TH             8
+#define VC31B_PS_WEAR_OFF_TH            4
+#define VC31B_ENV_WEAR_ON_MAX           2
+#define VC31B_ENV_WEAR_OFF_MAX          6
+#define VC31B_WEAR_ON_CNT               3
+#define VC31B_WEAR_OFF_CNT              6
 #define VC31B_ADJUST_INCREASE                   22 // 1.4 << 4 = 22.4//1.4f
 #define VC31B_ADJUST_DECREASE                     11 // 0.7 << 4 = 11.2//0.7f
 #define VC31B_ADJUST_STEP_MAX                   32
@@ -221,6 +227,7 @@ VC31Type vcType;
 VC31Info vcInfo;
 VC31AInfo vcaInfo;
 VC31BInfo vcbInfo;
+DriverHrmRawStatus g_driverHrmRaw;
 JsSysTime vcLastSample;
 
 static void vc31_w(uint8_t reg, uint8_t data) {
@@ -250,8 +257,36 @@ static void vc31_w16(uint8_t reg, uint16_t data) {
 }
 
 
+
+bool hrmGetDriverRawStatus(DriverHrmRawStatus *out) {
+  if (!out) return false;
+  *out = g_driverHrmRaw;
+  g_driverHrmRaw.ppg_fresh = false;
+  return true;
+}
+
 // we have a PPG value - save to vcInfo.ppgValue and send it to HRM monitor
 void vc31_new_ppg(uint16_t value) {
+  // Raw snapshot for driver-mode BLE streaming and debugging
+  g_driverHrmRaw.ppg_raw = value;
+  g_driverHrmRaw.irq_status = vcInfo.irqStatus;
+  g_driverHrmRaw.worn_stable = vcInfo.isWearing;
+  if (vcType == VC31B_DEVICE) {
+    g_driverHrmRaw.ps_raw = vcbInfo.sampleData.psValue;
+    g_driverHrmRaw.env_raw = vcbInfo.sampleData.envValue[2];
+    g_driverHrmRaw.led_current = vcbInfo.ledCurrent[0];
+    g_driverHrmRaw.pd_res = vcbInfo.pdRes[0];
+  } else {
+    g_driverHrmRaw.ps_raw = 0;
+    g_driverHrmRaw.env_raw = 0;
+    g_driverHrmRaw.led_current = 0;
+    g_driverHrmRaw.pd_res = 0;
+  }
+  g_driverHrmRaw.ppg_sat_high = value > (4095 - VC31B_PPG_TH * 32);
+  g_driverHrmRaw.ppg_sat_low = value < (VC31B_PPG_TH * 32);
+  g_driverHrmRaw.ppg_valid = g_driverHrmRaw.worn_stable && !g_driverHrmRaw.ppg_sat_high && !g_driverHrmRaw.ppg_sat_low;
+  g_driverHrmRaw.ppg_fresh = true;
+
   vcInfo.ppgLastValue = vcInfo.ppgValue;
   vcInfo.ppgValue = value;
 
@@ -266,7 +301,7 @@ void vc31_new_ppg(uint16_t value) {
 
   int v = vcInfo.ppgValue + vcInfo.ppgOffset;
   if (vcType == VC31B_DEVICE)
-    v <<= 1; // on VC31B the PPG doesn't vary as much with pulse so try and bulk it up here a bit
+    v <<= 1; // keep original Espruino HRM path unchanged
 
   hrmCallback(v);
 }
@@ -381,41 +416,52 @@ static void vc31a_wearstatus() {
 
 
 static void vc31b_wearstatus() {
+  bool wantOff =
+      (vcbInfo.sampleData.psValue <= VC31B_PS_WEAR_OFF_TH) ||
+      (vcbInfo.sampleData.envValue[2] >= VC31B_ENV_WEAR_OFF_MAX) ||
+      (vcbInfo.slot0EnvIsExceedFlag == true) ||
+      (vcbInfo.slot1EnvIsExceedFlag == true);
+
+  bool wantOn =
+      (vcbInfo.sampleData.psValue >= VC31B_PS_WEAR_ON_TH) &&
+      (vcbInfo.sampleData.envValue[2] <= VC31B_ENV_WEAR_ON_MAX) &&
+      (vcbInfo.slot0EnvIsExceedFlag == false) &&
+      (vcbInfo.slot1EnvIsExceedFlag == false);
+
   if (vcInfo.isWearing) {
-    if ((vcbInfo.sampleData.envValue[2] > VC31B_PS_TH) ||
-        (vcbInfo.sampleData.psValue < VC31B_PS_TH) ||
-        (vcbInfo.slot0EnvIsExceedFlag == true) ||
-        (vcbInfo.slot1EnvIsExceedFlag == true)) { // FIXME (or slot0EnvIsExceedFlag?)
+    if (wantOff) {
       if (--vcInfo.unWearCnt <= 0) {
         vcInfo.isWearing = false;
-        vcInfo.unWearCnt = VC31A_UNWEAR_CNT;
-        vcInfo.isWearCnt = VC31A_ISWEAR_CNT;
-        // FIXME if SP02 we need to do extra work here
-        // Disable SLOT0+1, enable SLOT2
-        vcbInfo.regConfig[0] = (vcbInfo.regConfig[0]&0xF8) | 0x04;
-        vc31_w(VC31B_REG11, vcbInfo.regConfig[0]);
+        vcInfo.unWearCnt = VC31B_WEAR_OFF_CNT;
+        vcInfo.isWearCnt = VC31B_WEAR_ON_CNT;
+        // In driverMode we keep SLOT0 running and only report worn=false.
+        if (!driverMode) {
+          vcbInfo.regConfig[0] = (vcbInfo.regConfig[0] & 0xF8) | 0x04;
+          vc31_w(VC31B_REG11, vcbInfo.regConfig[0]);
+        }
       }
     } else {
-      vcInfo.unWearCnt = VC31A_UNWEAR_CNT;
+      vcInfo.unWearCnt = VC31B_WEAR_OFF_CNT;
     }
-  } else { // not wearing
-    if ((vcbInfo.sampleData.psValue >= VC31B_PS_TH) &&
-        (vcbInfo.sampleData.envValue[2]<3)) {
+  } else {
+    if (wantOn) {
       if (--vcInfo.isWearCnt <= 0) {
         vcInfo.isWearing = true;
-        vcInfo.unWearCnt = VC31A_UNWEAR_CNT;
-        vcInfo.isWearCnt = VC31A_ISWEAR_CNT;
-        /* FIXME they used to do this but it seems like overkill!
-        vc31_softreset();
-        hrm_sensor_on(hrmCallback);*/
-        // Re-enable SLOT2 and SLOT0
-        vcbInfo.regConfig[0] = (vcbInfo.regConfig[0]&0xF8) | 0x05;
-        vc31_w(VC31B_REG11, vcbInfo.regConfig[0]);
+        vcInfo.unWearCnt = VC31B_WEAR_OFF_CNT;
+        vcInfo.isWearCnt = VC31B_WEAR_ON_CNT;
+        if (!driverMode) {
+          vcbInfo.regConfig[0] = (vcbInfo.regConfig[0] & 0xF8) | 0x05;
+          vc31_w(VC31B_REG11, vcbInfo.regConfig[0]);
+        }
       }
     } else {
-      vcInfo.isWearCnt = VC31A_ISWEAR_CNT;
+      vcInfo.isWearCnt = VC31B_WEAR_ON_CNT;
     }
   }
+
+  g_driverHrmRaw.worn_stable = vcInfo.isWearing;
+  g_driverHrmRaw.ps_raw = vcbInfo.sampleData.psValue;
+  g_driverHrmRaw.env_raw = vcbInfo.sampleData.envValue[2];
 }
 
 
@@ -753,7 +799,8 @@ void hrm_sensor_on(HrmCallback callback) {
   else jsiConsolePrintf("VC31 WHO_AM_I failed (%d)", deviceId);
 
   memset(&vcInfo, 0, sizeof(vcInfo));
-  vcInfo.isWearing = true;
+  memset(&g_driverHrmRaw, 0, sizeof(g_driverHrmRaw));
+  vcInfo.isWearing = driverMode ? false : true;
   vcInfo.unWearCnt = VC31A_UNWEAR_CNT;
   vcInfo.isWearCnt = VC31A_ISWEAR_CNT;
   vcInfo.ppgOffset = 0;
@@ -849,6 +896,9 @@ void hrm_sensor_on(HrmCallback callback) {
       vcbInfo.adjustInfo[slot].direction = AdjustDirection_Null;
       vcbInfo.adjustInfo[slot].directionLast = AdjustDirection_Null;
     }
+
+    vcInfo.unWearCnt = VC31B_WEAR_OFF_CNT;
+    vcInfo.isWearCnt = VC31B_WEAR_ON_CNT;
 
     // update status based on regConfig
     vcbInfo.totalSlots = ((vcbInfo.regConfig[0]&0x02)?1:0) + ((vcbInfo.regConfig[0]&0x01)?1:0);

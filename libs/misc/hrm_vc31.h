@@ -41,4 +41,22 @@ typedef struct {
 
 extern VC31Info vcInfo;
 
+
+typedef struct {
+  uint16_t ppg_raw;      // raw VC31 sample, before offset correction / amplification
+  uint8_t ps_raw;        // raw proximity slot value (0..15 on VC31B)
+  uint8_t env_raw;       // raw environment slot value (0..15 on VC31B)
+  uint8_t led_current;   // current LED current for SLOT0
+  uint8_t pd_res;        // current PD resistance for SLOT0
+  uint8_t irq_status;    // latest IRQ status register value
+  bool worn_stable;      // hysteresis-based wear detect status
+  bool ppg_valid;        // worn + not obviously saturated
+  bool ppg_sat_high;     // near full-scale saturation
+  bool ppg_sat_low;      // near zero saturation
+  bool ppg_fresh;        // new sample since last read
+} PACKED_FLAGS DriverHrmRawStatus;
+
+bool hrmGetDriverRawStatus(DriverHrmRawStatus *out);
+
+
 #endif
